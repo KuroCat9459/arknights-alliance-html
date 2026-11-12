@@ -538,9 +538,10 @@ h1, h2, h3, p { margin: 0; }
 .hero__deco span:nth-child(2) { color: transparent; -webkit-text-stroke-color: var(--line); }
 
 /* ---------- 布局 ---------- */
+/* 不建立层叠上下文：移动端抽屉（fixed z-index）需要盖过 .scrim 遮罩 */
 .layout {
   position: relative;
-  z-index: 1;
+  z-index: auto;
   max-width: var(--maxw);
   margin: 0 auto;
   padding: 0 clamp(16px, 3vw, 40px) 80px;
@@ -1291,8 +1292,7 @@ kbd {
   position: fixed;
   inset: 0;
   z-index: 75;
-  background: rgba(0, 0, 0, .55);
-  backdrop-filter: blur(2px);
+  background: rgba(0, 0, 0, .62);
   opacity: 0;
   pointer-events: none;
   transition: opacity .24s;

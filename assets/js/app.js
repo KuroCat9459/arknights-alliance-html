@@ -457,7 +457,7 @@
       </div>`;
 
     $("#modal").hidden = false;
-    document.body.style.overflow = "hidden";
+    lockScroll();
     $("#modal .modal__panel").scrollTop = 0;
     $("#copyLinkBtn").addEventListener("click", () => {
       const url = new URL(location.href);
@@ -475,11 +475,25 @@
     setTimeout(() => $("#modal .modal__panel")?.focus({ preventScroll: true }), 30);
   }
 
+  /* ---------- 滚动锁定 / 移动端抽屉 ---------- */
+  function lockScroll() {
+    const drawerOpen = $("#filterPanel").dataset.open === "true";
+    const modalOpen = !$("#modal").hidden;
+    document.body.style.overflow = drawerOpen || modalOpen ? "hidden" : "";
+  }
+
+  function setDrawer(open) {
+    $("#filterPanel").dataset.open = String(open);
+    const scrim = $("#filterScrim");
+    if (scrim) scrim.dataset.open = String(open);
+    lockScroll();
+  }
+
   function closeModal() {
     const m = $("#modal");
     if (m.hidden) return;
     m.hidden = true;
-    document.body.style.overflow = "";
+    lockScroll();
     if (lastFocus && lastFocus.focus) lastFocus.focus();
   }
 
@@ -530,7 +544,7 @@
       </div>`;
 
     $("#modal").hidden = false;
-    document.body.style.overflow = "hidden";
+    lockScroll();
     $("#modal .modal__panel").scrollTop = 0;
     setTimeout(() => $("#modal .modal__panel")?.focus({ preventScroll: true }), 30);
   }
@@ -687,20 +701,10 @@
     // 移动端筛选抽屉
     $("#mobFilterBtn").addEventListener("click", (e) => {
       e.stopPropagation();
-      const p = $("#filterPanel");
-      const open = p.dataset.open !== "true";
-      p.dataset.open = String(open);
-      const scrim = $("#filterScrim");
-      if (scrim) scrim.dataset.open = String(open);
+      setDrawer($("#filterPanel").dataset.open !== "true");
     });
-    $("#filterScrim")?.addEventListener("click", () => {
-      $("#filterPanel").dataset.open = "false";
-      $("#filterScrim").dataset.open = "false";
-    });
-    $("#closeFilterBtn")?.addEventListener("click", () => {
-      $("#filterPanel").dataset.open = "false";
-      $("#filterScrim").dataset.open = "false";
-    });
+    $("#filterScrim")?.addEventListener("click", () => setDrawer(false));
+    $("#closeFilterBtn")?.addEventListener("click", () => setDrawer(false));
 
     // 全局快捷键
     document.addEventListener("keydown", (e) => {
@@ -708,13 +712,17 @@
       const typing = tag === "input" || tag === "textarea" || tag === "select";
       if (e.key === "Escape") {
         closeModal();
-        $("#filterPanel").dataset.open = "false";
-        $("#filterScrim").dataset.open = "false";
+        setDrawer(false);
       }
       if (e.key === "/" && !typing) {
         e.preventDefault();
         $("#searchInput").focus();
       }
+    });
+
+    // 视口变宽（回到桌面布局）时自动收起抽屉
+    window.addEventListener("resize", () => {
+      if (window.innerWidth > 1180 && $("#filterPanel").dataset.open === "true") setDrawer(false);
     });
 
     // 图片加载失败兜底
