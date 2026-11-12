@@ -1,0 +1,19 @@
+# 原始数据缓存（构建时自动下载，勿提交）
+_raw/
+
+# 本地截图 / 临时文件
+_shots/
+*.local.*
+_dbg*.html
+_drawer.html
+_about.html
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
