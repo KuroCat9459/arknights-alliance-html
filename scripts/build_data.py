@@ -247,6 +247,8 @@ def build_equipment(raw, season):
                 "level": int(g.get("level") or it["level"] or 0),
                 "price": it["price"],
                 "bond": g.get("bond"),
+                "layers": parse_equip_layers(it["effect"]),
+                "grantBond": it["name"] == "变形同构体",
                 "effect": it["effect"],
                 "desc": it["desc"],
             }
@@ -448,6 +450,116 @@ def resolve_strategy_avatars(names):
     return out
 
 
+STACK_TRIGGERS = [
+    "战斗开始时",
+    "进入战斗时",
+    "部署时",
+    "每次开启技能",
+    "休整期结束时",
+    "进入休整期时",
+    "获得时",
+    "刷新时",
+    "售出时",
+    "被击倒时",
+    "战斗中",
+]
+
+
+def parse_stack(desc):
+    """从特质描述中解析一次触发的叠层：目标盟约 / 层数 / 触发时机 / 每回合上限。"""
+    if not desc:
+        return None
+    trig = ""
+    # 先匹配具体事件词（可能出现在 <战斗中> 内部），再退回相位标签
+    for kw, name in [
+        ("获得时", "获得时"),
+        ("休整期结束时", "休整期结束时"),
+        ("进入休整期时", "进入休整期时"),
+        ("战斗开始时", "战斗开始时"),
+        ("部署时", "部署时"),
+        ("开启技能", "每次开启技能"),
+        ("刷新时", "刷新时"),
+        ("售出时", "售出时"),
+        ("被击倒时", "被击倒时"),
+        ("战斗中", "战斗中"),
+    ]:
+        if kw in desc:
+            trig = name
+            break
+    # 临时层数转化：场上每有一名【X】干员，转化 N 层【X】临时层数为固定层数
+    mc = re.search(r"转化\s*<@ba\.vup>\s*(\d+)\s*</>\s*层", desc) or re.search(r"转化\s*(\d+)\s*层", desc)
+    if mc and "临时层数" in desc:
+        n = int(mc.group(1))
+        mcv = re.search(r"【([^】]+)】\s*临时层数", desc)
+        cvs = [mcv.group(1)] if mcv else re.findall(r"【([^】]+)】", desc)
+        cap = None
+        cm2 = re.search(r"至多叠加(\d+)层", desc)
+        if cm2:
+            cap = int(cm2.group(1))
+        return {
+            "cv": cvs[-1] if cvs else None,
+            "cvs": cvs,
+            "n": n,
+            "trig": trig,
+            "cap": cap,
+            "mode": "convert",
+            "temp": False,
+            "perMember": "每有一名" in desc,
+            "needActive": False,
+        }
+
+    m = re.search(r"层数\s*<@ba\.vup>\s*\+?(\d+)\s*</>", desc) or re.search(r"层数\s*\+(\d+)", desc)
+    if not m:
+        return None
+    n = int(m.group(1))
+    prefix = desc[: m.start()]
+    cvs = re.findall(r"【([^】]+)】", prefix)
+    cap = None
+    cm = re.search(r"至多叠加(\d+)层", desc)
+    if cm:
+        cap = int(cm.group(1))
+
+    # 叠层目标与激活要求
+    if cvs:
+        mode, cv = "covenant", cvs[-1]
+    elif "层数最多" in desc:
+        mode, cv = "highest", None
+    elif "核心盟约" in desc and "已激活" in desc:
+        mode, cv = "coreAll", None
+    elif "已激活的盟约" in desc or "已激活盟约" in desc:
+        mode, cv = "all", None
+    else:
+        mode, cv = "core", None
+
+    need_active = ("无需激活" not in desc) and trig != "获得时"
+    return {
+        "cv": cv,
+        "cvs": cvs if mode == "covenant" else [],
+        "n": n,
+        "trig": trig,
+        "cap": cap,
+        "mode": mode,
+        "temp": "临时层数" in desc,
+        "needActive": need_active,
+    }
+
+
+def parse_equip_layers(effect):
+    """装备提供的叠层（不含临时层数）。"""
+    txt = re.sub(r"<[^>]+>", "", effect or "")
+    if "层数" not in txt or "临时层数" in txt:
+        return []
+    m = re.search(r"层数\s*\+(\d+)", txt)
+    if not m:
+        return []
+    trig = ""
+    if "休整期结束" in txt:
+        trig = "休整期结束时"
+    elif "装备时" in txt:
+        trig = "装备时"
+    return [{"n": int(m.group(1)), "trig": trig}]
+
+
 def build_season(cfg, tables):
     src = cfg["source"]
     season = dig(tables[src], cfg["path"])
@@ -541,6 +653,7 @@ def build_season(cfg, tables):
                 "level": (entry.get("status") or {}).get("charLevel"),
                 "bonds": t_bonds,
                 "traits": traits,
+                "stacks": [x for x in (parse_stack(tr["d"]) for tr in traits) if x],
                 "desc": entry.get("desc", ""),
             }
 

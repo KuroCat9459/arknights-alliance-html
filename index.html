@@ -75,6 +75,10 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M7 19V9M12 19V5M17 19v-7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
       策略
     </button>
+    <button class="viewswitch__btn" data-view="sim" role="tab" aria-selected="false" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7.5 9.5h9M7.5 13h5.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+      模拟器
+    </button>
   </div>
 
   <div class="topbar-actions">
@@ -154,6 +158,18 @@
         <div class="fgroup__head"><span class="fgroup__label">增益效果</span><span class="fgroup__en">EFFECT</span></div>
         <div class="chips" id="seffChips"></div>
       </div>
+    </div>
+
+    <div id="simFilters" hidden>
+      <div class="fgroup" data-group="simban">
+        <div class="fgroup__head"><span class="fgroup__label">禁用核心盟约</span><span class="fgroup__en">CORE BAN</span></div>
+        <div class="chips" id="banCoreChips"></div>
+      </div>
+      <div class="fgroup" data-group="simban">
+        <div class="fgroup__head"><span class="fgroup__label">禁用附加盟约</span><span class="fgroup__en">SUB BAN</span></div>
+        <div class="chips" id="banSubChips"></div>
+      </div>
+      <div class="filters__note">被禁用盟约的干员不会出现在可选列表，已选的也会移出。</div>
     </div>
 
   </aside>

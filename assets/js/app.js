@@ -209,7 +209,22 @@
   function renderStats() {
     const st = season.stats;
     let items;
-    if (state.view === "strat") {
+    if (state.view === "sim") {
+      const s = sim();
+      const names = new Set();
+      s.picks.forEach((id) => {
+        const op = season.operators.find((o) => o.id === id);
+        if (!op) return;
+        (op.tiers[1] || op.tiers[0]).bonds.forEach((b) => names.add(b));
+        op.bonds.forEach((b) => names.add(b));
+      });
+      items = [
+        [s.picks.length, "已选干员"],
+        [SIM_MAX, "阵容上限"],
+        [names.size, "涉及盟约"],
+        [DATA.generated, "数据更新"],
+      ];
+    } else if (state.view === "strat") {
       const sts = season.strategies || [];
       const bonds = new Set();
       sts.forEach((s) => s.bonds.forEach((b) => bonds.add(b)));
@@ -235,6 +250,10 @@
 
   /* ---------- 筛选器 ---------- */
   function renderFilters() {
+    if (state.view === "sim") {
+      renderBanChips();
+      return;
+    }
     if (state.view === "strat") {
       renderStratFilters();
       return;
@@ -374,6 +393,10 @@
 
   /* ---------- 渲染列表 ---------- */
   function renderList() {
+    if (state.view === "sim") {
+      renderSimulator();
+      return;
+    }
     if (state.view === "strat") {
       renderStrategies();
       return;
@@ -583,6 +606,11 @@
       title: '盟约 <i>·</i> 特质数据库',
       lede: "收录《明日方舟》卫戍协议全部可调配干员：所属核心盟约、附加盟约、卫戍特质与等阶档位。按条件组合筛选，快速比对普通 / 精锐两档的层数与词条差异。",
     },
+    sim: {
+      eyebrow: "SQUAD SIMULATOR / 阵容模拟",
+      title: '阵容 <i>·</i> 模拟器',
+      lede: "选择本局禁用的盟约，再挑选最多 9 名干员，实时统计各盟约人数、由谁叠层、如何叠层与预计层数；可为当前干员装载两件装备（含变形同构体转职）。",
+    },
     strat: {
       eyebrow: "S.W.E.E.P. · STRATEGY REPORT / 策略报告",
       title: '策略 <i>·</i> 数据统计',
@@ -603,7 +631,8 @@
       b.setAttribute("aria-selected", String(on));
     });
     $("#stratFilters").hidden = view !== "strat";
-    $$("#filterPanel > .fgroup").forEach((g) => (g.hidden = view === "strat"));
+    $("#simFilters").hidden = view !== "sim";
+    $$("#filterPanel > .fgroup").forEach((g) => (g.hidden = view !== "ops"));
     if (!opts.silent) {
       renderStats();
       renderFilters();
@@ -960,7 +989,7 @@
   /* ---------- URL 同步 ---------- */
   function syncHash() {
     const p = new URLSearchParams();
-    if (state.view === "strat") p.set("view", "strat");
+    if (state.view !== "ops") p.set("view", state.view);
     if (state.mode === "equip") p.set("type", "equip");
     if (state.sbonds.size) p.set("sb", [...state.sbonds].join(","));
     if (state.seff.size) p.set("se", [...state.seff].join(","));
@@ -994,7 +1023,7 @@
     set("sub", state.sub);
     set("trait", state.traits);
     if (p.get("type") === "equip") state.mode = "equip";
-    if (p.get("view") === "strat") state.view = "strat";
+    if (["strat", "sim"].includes(p.get("view"))) state.view = p.get("view");
     set("sb", state.sbonds);
     set("se", state.seff);
     if (p.get("q")) state.q = p.get("q");
@@ -1011,6 +1040,439 @@
     }, 120);
   }
 
+  /* ---------- 阵容模拟器 ---------- */
+  const SIM_MAX = 9;
+
+  function sim() {
+    if (!state.sim) state.sim = { banned: new Set(), picks: [], active: null, equip: {}, rank: "", core: "", sub: "" };
+    return state.sim;
+  }
+
+  function bondName(id) {
+    const b = bondMap.get(id);
+    return b ? b.name : id;
+  }
+
+  function coreBondOf(op) {
+    return (op.bonds || []).find((id) => bondMap.get(id)?.type === "SEASON") || null;
+  }
+
+  function simEquipOf(opId) {
+    const s = sim();
+    if (!s.equip[opId]) s.equip[opId] = [null, null];
+    return s.equip[opId];
+  }
+
+  function allBondsOf(op) {
+    const t = op.tiers[1] || op.tiers[0];
+    return new Set([...(t.bonds || []), ...(op.bonds || [])]);
+  }
+
+  function simOpAvailable(op) {
+    const s = sim();
+    for (const b of allBondsOf(op)) if (s.banned.has(b)) return false;
+    return true;
+  }
+
+  function isMorphEquipped(opId) {
+    return simEquipOf(opId).some((id) => {
+      const e = id ? (season.equipment || []).find((x) => x.id === id) : null;
+      return e && e.name === "变形同构体";
+    });
+  }
+
+  function rankBadge(n) {
+    return `<i class="rankbadge-mini" style="--rk:${RANK_COLOR[n] || "#9aa8a1"}">${ROMAN[n] || n}</i>`;
+  }
+
+  function simTogglePick(id) {
+    const s = sim();
+    const i = s.picks.indexOf(id);
+    if (i >= 0) {
+      s.picks.splice(i, 1);
+      if (s.active === id) s.active = s.picks[0] || null;
+      delete s.equip[id];
+    } else if (s.picks.length < SIM_MAX) {
+      s.picks.push(id);
+      s.active = id;
+    }
+    renderSimulator();
+  }
+
+  function renderBanChips() {
+    const s = sim();
+    const core = season.bonds.filter((b) => b.type === "SEASON");
+    const sub = season.bonds.filter(
+      (b) => b.type !== "SEASON" && !HIDDEN_BONDS.has(b.id) && !HIDDEN_BONDS.has(b.name)
+    );
+    const chip = (b) =>
+      `<button class="chip chip--ban" data-group="simban" data-value="${esc(b.id)}" aria-pressed="${s.banned.has(
+        b.id
+      )}">${esc(b.name)}</button>`;
+    $("#banCoreChips").innerHTML = core.map(chip).join("");
+    $("#banSubChips").innerHTML = sub.map(chip).join("");
+  }
+
+  function showCovPop(name, anchor) {
+    const b = bondByName.get(name);
+    if (!b) return;
+    const pop = ensureTermPop();
+    pop.innerHTML = `<div class="termpop__head">
+        <b>【${esc(name)}】</b>
+        <span>${b.type === "SEASON" ? "核心盟约" : "附加盟约"}${b.people ? ` · 需 ${b.people} 人` : ""}</span>
+      </div>
+      <div class="covpop__desc">${rich(b.desc) || "—"}</div>`;
+    pop.hidden = false;
+    const r = anchor.getBoundingClientRect();
+    const pr = pop.getBoundingClientRect();
+    let left = r.left + r.width / 2 - pr.width / 2;
+    left = Math.max(10, Math.min(left, window.innerWidth - pr.width - 10));
+    let top = r.bottom + 8;
+    if (top + pr.height > window.innerHeight - 10) top = Math.max(10, r.top - pr.height - 8);
+    pop.style.left = `${Math.round(left)}px`;
+    pop.style.top = `${Math.round(top)}px`;
+  }
+
+  function simSelect(id, value, options, label) {
+    return `<label class="simsel"><span>${label}</span>
+      <select data-simfilter="${id}">
+        <option value="">全部</option>
+        ${options
+          .map(
+            (o) =>
+              `<option value="${esc(o.value)}" ${String(o.value) === String(value) ? "selected" : ""}>${esc(
+                o.label
+              )}</option>`
+          )
+          .join("")}
+      </select></label>`;
+  }
+
+  function renderSimulator() {
+    renderStats();
+    const s = sim();
+    const ops = season.operators;
+    const equip = season.equipment || [];
+    const eqById = new Map(equip.map((e) => [e.id, e]));
+    const byId = new Map(ops.map((o) => [o.id, o]));
+
+    // 清除被禁用盟约影响的选择
+    s.picks = s.picks.filter((id) => {
+      const op = byId.get(id);
+      return op && simOpAvailable(op);
+    });
+    if (s.active && !s.picks.includes(s.active)) s.active = s.picks[0] || null;
+
+    // 每名干员的盟约集合（含变形同构体转职）
+    const bondsOf = new Map();
+    s.picks.forEach((id) => {
+      const op = byId.get(id);
+      if (!op) return;
+      const set = allBondsOf(op);
+      const [, other] = simEquipOf(id);
+      if (isMorphEquipped(id)) {
+        const e = other ? eqById.get(other) : null;
+        if (e && e.bond) set.add(e.bond);
+      }
+      bondsOf.set(id, set);
+    });
+
+    // 人数与激活状态
+    const counts = new Map();
+    bondsOf.forEach((set) =>
+      set.forEach((bid) => {
+        const nm = bondName(bid);
+        counts.set(nm, (counts.get(nm) || 0) + 1);
+      })
+    );
+    // 调和：激活时使所有核心盟约的激活人数 +1
+    const maniBond = bondByName.get("调和");
+    const maniOn = (counts.get("调和") || 0) >= (maniBond && maniBond.people ? maniBond.people : 1);
+    const effCount = (nm) => {
+      const base = counts.get(nm) || 0;
+      const b = bondByName.get(nm);
+      return maniOn && b && b.type === "SEASON" ? base + 1 : base;
+    };
+    const activated = (nm) => {
+      const b = bondByName.get(nm);
+      const need = b && b.people ? b.people : 1;
+      return effCount(nm) >= need;
+    };
+
+    // 叠层汇总
+    const cov = new Map();
+    const touch = (nm) => {
+      if (!cov.has(nm)) cov.set(nm, { layers: [], permB: 0, permR: 0, tempB: 0, tempR: 0, converts: [] });
+      return cov.get(nm);
+    };
+    counts.forEach((_c, nm) => touch(nm));
+
+    const isRestPhase = (trig) => ["休整期结束时", "进入休整期时"].includes(trig);
+
+    s.picks.forEach((id) => {
+      const op = byId.get(id);
+      if (!op) return;
+      const tier = op.tiers[1] || op.tiers[0];
+      const coreNm = bondName(coreBondOf(op) || op.bonds[0]);
+      const mine = [...bondsOf.get(id)].map(bondName);
+      (tier.stacks || []).forEach((st) => {
+        let targets;
+        if (st.mode === "covenant") targets = (st.cvs && st.cvs.length ? st.cvs : [st.cv]).filter(Boolean);
+        else if (st.mode === "coreAll")
+          targets = [...counts.keys()].filter((n) => {
+            const b = bondByName.get(n);
+            return b && b.type === "SEASON" && activated(n);
+          });
+        else if (st.mode === "all") targets = mine.filter(activated);
+        else targets = [coreNm];
+        if (!targets.length) targets = [coreNm];
+        targets.forEach((t) => {
+          const c = touch(t);
+          const on = activated(t) || !st.needActive;
+          if (st.mode === "convert") {
+            c.converts.push({ who: op.name, n: st.n, perMember: !!st.perMember, trig: st.trig, inactive: !on });
+            return;
+          }
+          c.layers.push({
+            who: op.name,
+            n: st.n,
+            trig: st.trig,
+            cap: st.cap,
+            skill: st.trig === "每次开启技能",
+            temp: !!st.temp,
+            inactive: !on,
+          });
+          if (on) {
+            const rest = isRestPhase(st.trig);
+            if (st.temp) {
+              if (rest) c.tempR += st.n;
+              else c.tempB += st.n;
+            } else if (rest) c.permR += st.n;
+            else c.permB += st.n;
+          }
+        });
+      });
+      simEquipOf(id).forEach((eid) => {
+        const e = eid ? eqById.get(eid) : null;
+        if (!e || !e.layers) return;
+        e.layers.forEach((l) => {
+          const c = touch(coreNm);
+          const on = activated(coreNm);
+          c.layers.push({ who: op.name, n: l.n, trig: l.trig, eq: e.name, inactive: !on });
+          if (on) {
+            if (isRestPhase(l.trig)) c.permR += l.n;
+            else c.permB += l.n;
+          }
+        });
+      });
+    });
+
+    // 阵容槽
+    const slots = [];
+    for (let i = 0; i < SIM_MAX; i++) {
+      const id = s.picks[i];
+      const op = id ? byId.get(id) : null;
+      if (op) {
+        const core = coreBondOf(op);
+        slots.push(`<button class="simslot ${s.active === id ? "is-active" : ""}" data-simslot="${id}" type="button" title="${esc(
+          op.name
+        )}">
+          ${rankBadge(op.rank)}
+          <img src="assets/img/ops/${esc(op.id)}.webp" alt="${esc(op.name)}">
+          <span>${esc(op.name)}</span>
+          <i class="simslot__x" data-simremove="${id}">×</i>
+          ${core ? `<em>${esc(bondName(core))}</em>` : ""}
+        </button>`);
+      } else {
+        slots.push(`<div class="simslot simslot--empty"><span>空位</span></div>`);
+      }
+    }
+
+    // 装备槽
+    const activeOp = s.active ? byId.get(s.active) : null;
+    let equipHTML = "";
+    if (activeOp) {
+      const [a, b] = simEquipOf(s.active);
+      const slot = (eid, idx) => {
+        const e = eid ? eqById.get(eid) : null;
+        return `<button class="simeq ${e ? "is-on" : ""}" data-eqslot="${idx}" type="button">
+          <span class="simeq__icon">${
+            e
+              ? `<img src="assets/img/equip/${esc(e.id)}.png" alt="">`
+              : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.5v13M5.5 12h13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>'
+          }</span>
+          <span class="simeq__name">${e ? esc(e.name) : "点击选择装备"}</span>
+          ${e ? rankBadge(e.level) : ""}
+        </button>`;
+      };
+      equipHTML = `<div class="simequip">
+        <div class="simequip__head">为 <b>${esc(activeOp.name)}</b> 装载装备 <em>（变形同构体需与另一件带盟约的装备搭配）</em></div>
+        <div class="simequip__slots">${slot(a, 0)}${slot(b, 1)}</div>
+      </div>`;
+    }
+
+    // 盟约面板
+    const names = [...cov.keys()].sort((x, y) => {
+      const ax = activated(x) ? 1 : 0;
+      const ay = activated(y) ? 1 : 0;
+      return ay - ax || (counts.get(y) || 0) - (counts.get(x) || 0) || x.localeCompare(y, "zh-Hans-CN");
+    });
+    const covRows = names
+      .map((name) => {
+        const c = cov.get(name);
+        const on = activated(name);
+        const baseCount = counts.get(name) || 0;
+        const convCap = c.converts.reduce((s, cv) => s + cv.n * (cv.perMember ? baseCount : 1), 0);
+        const temp = c.tempB + c.tempR;
+        const converted = Math.min(temp, convCap);
+        const total = c.permB + c.permR + converted;
+        const rows =
+          c.layers
+            .map(
+              (l) => `<li class="${l.inactive ? "is-off" : ""}">
+              <b>${esc(l.who)}</b>
+              <span>${esc(l.trig || "生效")}</span>
+              <em>+${l.n}</em>
+              ${l.skill ? '<i class="simtag simtag--skill">技能×1</i>' : ""}
+              ${l.cap ? `<i class="simtag">上限 ${l.cap}</i>` : ""}
+              ${l.temp ? '<i class="simtag simtag--temp">临时</i>' : ""}
+              ${l.eq ? `<i class="simtag simtag--eq">${esc(l.eq)}</i>` : ""}
+              ${l.inactive ? '<i class="simtag simtag--off">未激活</i>' : ""}
+            </li>`
+            )
+            .join("") +
+          c.converts
+            .map((cv) => {
+              const amt = cv.n * (cv.perMember ? baseCount : 1);
+              return `<li class="is-conv ${cv.inactive ? "is-off" : ""}">
+              <b>${esc(cv.who)}</b>
+              <span>${esc(cv.trig || "休整期")} · 转化为固定</span>
+              <em>可转化 ${amt}</em>
+              <i class="simtag simtag--conv">转化</i>
+              ${cv.perMember ? `<i class="simtag">×${baseCount} 人</i>` : ""}
+            </li>`;
+            })
+            .join("");
+        const split = `战斗 ${c.permB} · 整备 ${c.permR}${temp ? ` · 临时 ${temp} → 转化 ${converted}` : ""}`;
+        return `<div class="covrow ${on ? "" : "is-off"}">
+          <div class="covrow__head">
+            <span class="covrow__name" data-cov="${esc(name)}">${esc(name)}</span>
+            <span class="covrow__count">${effCount(name)} 人${
+              maniOn && bondByName.get(name)?.type === "SEASON" ? "（调和 +1）" : ""
+            }</span>
+            <i class="simtag ${on ? "simtag--on" : "simtag--off"}">${on ? "已激活" : "未激活"}</i>
+            <span class="covrow__sum">≈ ${total} 层</span>
+          </div>
+          <div class="covrow__split">${split}</div>
+          <ul class="covrow__layers">${rows || '<li class="is-empty">暂无叠层来源</li>'}</ul>
+        </div>`;
+      })
+      .join("");
+
+    // 可选干员
+    const picked = new Set(s.picks);
+    const rankOptions = [...new Set(ops.map((o) => o.rank))].sort((a, b) => a - b).map((r) => ({ value: r, label: `${r} 阶` }));
+    const coreOptions = season.bonds.filter((b) => b.type === "SEASON").map((b) => ({ value: b.id, label: b.name }));
+    const subOptions = season.bonds
+      .filter((b) => b.type !== "SEASON" && !HIDDEN_BONDS.has(b.id) && !HIDDEN_BONDS.has(b.name))
+      .map((b) => ({ value: b.id, label: b.name }));
+
+    const list = ops
+      .filter((op) => simOpAvailable(op) && !picked.has(op.id))
+      .filter((op) => !s.rank || op.rank === Number(s.rank))
+      .filter((op) => !s.core || coreBondOf(op) === s.core)
+      .filter((op) => !s.sub || allBondsOf(op).has(s.sub))
+      .filter((op) => !state.q || op.name.includes(state.q));
+
+    const pickHtml = list
+      .map(
+        (op) => `<button class="simpick" data-simpick="${op.id}" type="button" title="${esc(op.name)}">
+          ${rankBadge(op.rank)}
+          <img src="assets/img/ops/${esc(op.id)}.webp" alt="" loading="lazy">
+          <span>${esc(op.name)}</span>
+        </button>`
+      )
+      .join("");
+
+    $("#resultCount").innerHTML = `<b>${s.picks.length}</b> / ${SIM_MAX} 名干员`;
+    $("#listFoot").hidden = true;
+    $("#searchInput").placeholder = "搜索干员名…";
+
+    $("#opList").innerHTML = `<div class="sim">
+      <div class="sim__main">
+        <section class="sim__lineup">
+          <div class="sim__head"><h2>出战阵容</h2><span>点击头像设为当前干员，× 移除；最多 ${SIM_MAX} 名</span></div>
+          <div class="sim__slots">${slots.join("")}</div>
+          ${equipHTML}
+        </section>
+        <section class="sim__picker">
+          <div class="sim__head"><h3>可选干员</h3><span>${list.length} 名可选</span></div>
+          <div class="sim__filters">
+            ${simSelect("rank", s.rank, rankOptions, "等级")}
+            ${simSelect("core", s.core, coreOptions, "核心盟约")}
+            ${simSelect("sub", s.sub, subOptions, "附加盟约")}
+          </div>
+          <div class="sim__grid">${pickHtml || '<div class="sim__empty">没有符合条件的干员</div>'}</div>
+        </section>
+      </div>
+      <aside class="sim__panel">
+        <div class="sim__head"><h2>盟约与叠层</h2><span>悬停盟约名查看效果</span></div>
+        ${covRows || '<div class="sim__empty">先选择干员，这里会列出盟约人数与预计叠层</div>'}
+      </aside>
+    </div>`;
+
+    $("#emptyState").hidden = true;
+    $("#opList").hidden = false;
+    renderActiveFilters();
+    syncHash();
+  }
+
+  let equipPickSlot = 0;
+  function renderEquipPicker(rank) {
+    const eqs = (season.equipment || []).filter((e) => !rank || e.level === Number(rank));
+    return `<div class="mop__section" style="padding-top:0">
+      <h4>选择装备 · 槽位 ${equipPickSlot + 1}</h4>
+      <div class="sim__filters" style="margin-bottom:12px">
+        <label class="simsel"><span>等级</span>
+          <select data-eqrank>
+            <option value="">全部</option>
+            ${[1, 2, 3, 4, 5, 6]
+              .map((r) => `<option value="${r}" ${String(r) === String(rank) ? "selected" : ""}>${ROMAN[r]} 阶</option>`)
+              .join("")}
+          </select>
+        </label>
+      </div>
+      <div class="eqpick">${eqs
+        .map(
+          (e) => `<button class="eqpick__item" data-pickeq="${e.id}" type="button">
+            <img src="assets/img/equip/${esc(e.id)}.png" alt="" loading="lazy">
+            <span>${esc(e.name)}</span>
+            ${rankBadge(e.level)}
+          </button>`
+        )
+        .join("")}</div>
+    </div>`;
+  }
+
+  let equipRankFilter = "";
+  function openEquipPicker(slot) {
+    const s = sim();
+    if (!s.active) return;
+    equipPickSlot = slot;
+    equipRankFilter = "";
+    lastFocus = document.activeElement;
+    $("#modalBody").innerHTML = renderEquipPicker(equipRankFilter);
+    $("#modal").hidden = false;
+    lockScroll();
+    setTimeout(() => $("#modal .modal__panel")?.focus({ preventScroll: true }), 30);
+  }
+
+  function onEquipRankChange(value) {
+    equipRankFilter = value;
+    $("#modalBody").innerHTML = renderEquipPicker(equipRankFilter);
+  }
+
+  /* ---------- 事件 ---------- */
   /* ---------- 事件 ---------- */
   function bindUI() {
     // 筛选 chip
@@ -1131,6 +1593,85 @@
         syncHash();
       })
     );
+
+    // 模拟器：禁用盟约
+    $("#filterPanel").addEventListener("click", (e) => {
+      const chip = e.target.closest('[data-group="simban"]');
+      if (!chip) return;
+      const s = sim();
+      const v = chip.dataset.value;
+      if (s.banned.has(v)) s.banned.delete(v);
+      else s.banned.add(v);
+      renderFilters();
+      renderList();
+    });
+
+    // 模拟器：选人 / 装备槽 / 移除
+    $("#opList").addEventListener("click", (e) => {
+      const rm = e.target.closest("[data-simremove]");
+      if (rm) {
+        e.stopPropagation();
+        simTogglePick(rm.dataset.simremove);
+        return;
+      }
+      const pick = e.target.closest("[data-simpick]");
+      if (pick) {
+        simTogglePick(pick.dataset.simpick);
+        return;
+      }
+      const slot = e.target.closest("[data-simslot]");
+      if (slot) {
+        sim().active = slot.dataset.simslot;
+        renderSimulator();
+        return;
+      }
+      const eqs = e.target.closest("[data-eqslot]");
+      if (eqs) {
+        openEquipPicker(Number(eqs.dataset.eqslot));
+      }
+    });
+
+    // 模拟器：盟约悬浮说明
+    document.addEventListener("mouseover", (e) => {
+      const n = e.target.closest(".covrow__name");
+      if (!n) return;
+      clearTimeout(termHideTimer);
+      showCovPop(n.dataset.cov, n);
+    });
+    document.addEventListener("mouseout", (e) => {
+      const n = e.target.closest(".covrow__name");
+      if (!n) return;
+      const to = e.relatedTarget;
+      if (to && to.closest && to.closest(".termpop")) return;
+      termHideTimer = setTimeout(hideTermPop, 180);
+    });
+
+    // 模拟器：可选干员筛选
+    $("#opList").addEventListener("change", (e) => {
+      const sel = e.target.closest("[data-simfilter]");
+      if (!sel) return;
+      sim()[sel.dataset.simfilter] = sel.value;
+      renderSimulator();
+    });
+
+    // 模拟器：装备等级筛选
+    $("#modalBody").addEventListener("change", (e) => {
+      const sel = e.target.closest("[data-eqrank]");
+      if (!sel) return;
+      onEquipRankChange(sel.value);
+    });
+
+    // 模拟器：装备选择
+    $("#modalBody").addEventListener("click", (e) => {
+      const item = e.target.closest("[data-pickeq]");
+      if (!item) return;
+      const s = sim();
+      if (!s.active) return;
+      const arr = simEquipOf(s.active);
+      arr[equipPickSlot] = item.dataset.pickeq;
+      closeModal();
+      renderSimulator();
+    });
 
 
     // 卡片点击 / 键盘
