@@ -66,6 +66,17 @@
     </span>
   </a>
 
+  <div class="viewswitch" role="tablist" aria-label="数据视图">
+    <button class="viewswitch__btn is-on" data-view="ops" role="tab" aria-selected="true" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M4.8 20c.9-3.6 3.7-5.6 7.2-5.6s6.3 2 7.2 5.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+      干员
+    </button>
+    <button class="viewswitch__btn" data-view="strat" role="tab" aria-selected="false" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M7 19V9M12 19V5M17 19v-7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+      策略
+    </button>
+  </div>
+
   <div class="topbar-actions">
     <div class="season-static" title="常驻协议 · V3.1">
       <span class="season-btn__tag">序列</span>
@@ -88,9 +99,9 @@
 
 <section class="hero">
   <div class="hero__inner">
-    <p class="eyebrow"><span class="dot"></span> ALLIANCE · TRAIT ARCHIVE / 数据档案</p>
-    <h1>盟约 <i>·</i> 特质数据库</h1>
-    <p class="lede">
+    <p class="eyebrow" id="heroEyebrow"><span class="dot"></span> ALLIANCE · TRAIT ARCHIVE / 数据档案</p>
+    <h1 id="heroTitle">盟约 <i>·</i> 特质数据库</h1>
+    <p class="lede" id="heroLede">
       收录《明日方舟》卫戍协议全部可调配干员：所属核心盟约、附加盟约、卫戍特质与等阶档位。
       按条件组合筛选，快速比对普通 / 精锐两档的层数与词条差异。
     </p>
@@ -133,6 +144,17 @@
       <div class="chips" id="traitChips"></div>
     </div>
 
+
+    <div id="stratFilters" hidden>
+      <div class="fgroup" data-group="sbond">
+        <div class="fgroup__head"><span class="fgroup__label">盟约</span><span class="fgroup__en">COVENANT</span></div>
+        <div class="chips" id="sbondChips"></div>
+      </div>
+      <div class="fgroup" data-group="seff">
+        <div class="fgroup__head"><span class="fgroup__label">增益效果</span><span class="fgroup__en">EFFECT</span></div>
+        <div class="chips" id="seffChips"></div>
+      </div>
+    </div>
 
   </aside>
 
